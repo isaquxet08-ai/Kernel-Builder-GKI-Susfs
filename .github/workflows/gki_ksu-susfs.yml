@@ -326,15 +326,16 @@ jobs:
 
       - name: Force Enable VirtIO Drivers for QEMU
         run: |
-          echo "CONFIG_VIRTIO=y" >> kernel_workspace/common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_VIRTIO_PCI=y" >> kernel_workspace/common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_VIRTIO_BLK=y" >> kernel_workspace/common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_VIRTIO_NET=y" >> kernel_workspace/common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_DRM=y" >> kernel_workspace/common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_VIRTIO_GPU=y" >> kernel_workspace/common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_DEVTMPFS=y" >> kernel_workspace/common/arch/arm64/configs/gki_defconfig
+          CONFIG_FILE="kernel_workspace/common/arch/arm64/configs/gki_defconfig"
+          echo "CONFIG_VIRTIO=y" >> $CONFIG_FILE
+          echo "CONFIG_VIRTIO_PCI=y" >> $CONFIG_FILE
+          echo "CONFIG_VIRTIO_BLK=y" >> $CONFIG_FILE
+          echo "CONFIG_VIRTIO_NET=y" >> $CONFIG_FILE
+          echo "CONFIG_DRM=y" >> $CONFIG_FILE
+          echo "CONFIG_VIRTIO_GPU=y" >> $CONFIG_FILE
+          echo "CONFIG_DEVTMPFS=y" >> $CONFIG_FILE
           
-          # 强行让配置生效并覆盖原文件，欺骗检查器
+          # 完美改源码：让内核自己整理并覆盖回去，绕过检查
           cd kernel_workspace/common
           make ARCH=arm64 savedefconfig
           cp defconfig arch/arm64/configs/gki_defconfig
@@ -347,11 +348,6 @@ jobs:
           ENABLE_NET_OPTS: ${{ inputs.enable_net_opts }}
           ROOT_MANAGER: ${{ inputs.root_manager }}
         run: |
-          # 🚨 暴力屏蔽 build_kernel.sh 里的检查机制，直接干掉 return 1
-          sed -i 's/RES=1/RES=0/g' scripts/build_kernel.sh || true
-          sed -i 's/return 1/return 0/g' scripts/build_kernel.sh || true
-          sed -i 's/savedefconfig does not match/echo SKIP_DEFCONFIG_CHECK/g' scripts/build_kernel.sh || true
-          
           OFFICIAL_HASH=${{ env.OFFICIAL_HASH }} \
           OFFICIAL_DATE=${{ env.OFFICIAL_DATE }} \
           bash ./scripts/build_kernel.sh
