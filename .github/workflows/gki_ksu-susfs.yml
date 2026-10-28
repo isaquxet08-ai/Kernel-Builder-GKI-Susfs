@@ -364,12 +364,16 @@ jobs:
 
       - name: Force Enable VirtIO Drivers for QEMU
         run: |
+          echo "CONFIG_PCI=y" >> kernel_workspace/common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_VIRTIO_MENU=y" >> kernel_workspace/common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_VIRTIO=y" >> kernel_workspace/common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_VIRTIO_PCI=y" >> kernel_workspace/common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_VIRTIO_BLK=y" >> kernel_workspace/common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_VIRTIO_NET=y" >> kernel_workspace/common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_DRM=y" >> kernel_workspace/common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_VIRTIO_GPU=y" >> kernel_workspace/common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_DEVTMPFS=y" >> kernel_workspace/common/arch/arm64/configs/gki_defconfig
-          echo ">>> VirtIO drivers injected!"
+          echo ">>> VirtIO drivers and dependencies injected!"
 
       - name: Build common kernel Image
         env:
