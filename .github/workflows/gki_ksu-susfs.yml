@@ -142,6 +142,7 @@ jobs:
           ROOT_MANAGER: ${{ inputs.root_manager }}
         run: |
           echo ">>> 正在将根目录的自定义配置覆盖到源码中..."
+          sudo apt-get update -qq && sudo apt-get install -y libelf-dev dwarves bison flex libssl-dev
           cp gki_defconfig kernel_workspace/common/arch/arm64/configs/gki_defconfig
           
           cd kernel_workspace/common
