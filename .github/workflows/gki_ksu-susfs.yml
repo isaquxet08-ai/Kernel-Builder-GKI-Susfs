@@ -142,7 +142,7 @@ jobs:
           ROOT_MANAGER: ${{ inputs.root_manager }}
         run: |
           echo ">>> 正在将根目录的自定义配置覆盖到源码中..."
-          sudo apt-get update -qq && sudo apt-get install -y libelf-dev dwarves bison flex libssl-dev
+          sudo apt-get update -qq && sudo apt-get install -y libelf-dev zlib1g-dev dwarves bison flex libssl-dev
           cp gki_defconfig kernel_workspace/common/arch/arm64/configs/gki_defconfig
           
           cd kernel_workspace/common
@@ -157,7 +157,15 @@ jobs:
           grep -rl "return 1" kernel_workspace | xargs sed -i 's/return 1/return 0/g' || true
           grep -rl "diff -u" kernel_workspace | xargs sed -i 's/diff -u/echo -u/g' || true
 
-          echo ">>> 检查器已彻底粉碎，开始正式编译..."
+          
+          echo "# CONFIG_MODULE_SIG is not set" >> arch/arm64/configs/gki_defconfig
+          echo "# CONFIG_MODULE_SIG_ALL is not set" >> arch/arm64/configs/gki_defconfig
+          echo "# CONFIG_MODULE_SIG_FORCE is not set" >> arch/arm64/configs/gki_defconfig
+          echo "# CONFIG_SYSTEM_TRUSTED_KEYS is not set" >> arch/arm64/configs/gki_defconfig
+          echo "# CONFIG_SYSTEM_REVOCATION_KEYS is not set" >> arch/arm64/configs/gki_defconfig
+          
+          echo ">>> 签名已扬，开始正式编译..."
+
           OFFICIAL_HASH=${{ env.OFFICIAL_HASH }} \
           OFFICIAL_DATE=${{ env.OFFICIAL_DATE }} \
           bash ./scripts/build_kernel.sh
