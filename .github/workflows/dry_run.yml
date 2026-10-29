@@ -1,0 +1,30 @@
+name: Dry Run - 环境依赖检查
+on:
+  workflow_dispatch:
+
+jobs:
+  check-env:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@main
+        with:
+          preinstalled-runtimes: true
+          android: false
+          dotnet: true
+          haskell: false
+          large-packages: false
+          docker-images: false
+          swap-storage: false
+
+      - name: Verify Python
+        run: python3 --version
+
+      - name: Run Dependency Check
+        run: |
+          echo ">>> 开始执行 Python 依赖自检脚本..."
+          python3 scripts/check_deps.py
+          echo ">>> 自检结束，如果没报错，说明环境完美！"
