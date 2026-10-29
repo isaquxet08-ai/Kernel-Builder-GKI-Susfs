@@ -137,6 +137,11 @@ jobs:
         run: |
           bash ./scripts/integrate_susfs.sh
 
+
+      - name: Run Dependency Check
+        run: |
+          python3 scripts/check_deps.py
+
       - name: Override Config and Build Kernel
         env:
           ROOT_MANAGER: ${{ inputs.root_manager }}
