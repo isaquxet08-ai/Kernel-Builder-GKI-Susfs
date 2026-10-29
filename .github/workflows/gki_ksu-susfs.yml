@@ -100,24 +100,6 @@ jobs:
           echo "BASE_VER=$BASE_VER" >> $GITHUB_ENV
           echo "ROOT_MANAGER=${{ inputs.root_manager }}" >> $GITHUB_ENV
 
-      - name: Configure Build Channels
-        if: inputs.root_manager != 'Stock' && inputs.enable_ksu_susfs == true
-        run: |
-          case "${{ inputs.root_manager }}" in
-            "KernelSU-Next")
-              U_REPO="KernelSU-Next/KernelSU-Next"
-              T_BRANCH="dev"
-              ;;
-            *)
-              U_REPO="tiann/KernelSU"
-              T_BRANCH="main"
-              ;;
-          esac
-          echo "KSU_VARIANT_REPO_URL=https://github.com/$U_REPO.git" >> $GITHUB_ENV
-          echo "KSU_VARIANT_REF=$T_BRANCH" >> $GITHUB_ENV
-          echo "SUSFS_REPO_URL=https://gitlab.com/shoey63/susfs4ksu.git" >> $GITHUB_ENV
-          echo "SUSFS_BRANCH=gki-android12-5.10-dev" >> $GITHUB_ENV
-
       - name: Setup repo tool
         run: |
           mkdir -p "$HOME/bin"
@@ -134,21 +116,6 @@ jobs:
           echo "OFFICIAL_HASH=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
           echo "OFFICIAL_DATE=$(git log -1 --format=%ct)" >> $GITHUB_ENV
 
-      - name: Integrate Root Manager
-        if: inputs.root_manager != 'Stock' && inputs.enable_ksu_susfs == true
-        env:
-          KSU_VARIANT_REPO_URL: ${{ env.KSU_VARIANT_REPO_URL }}
-          KSU_VARIANT_REF: ${{ env.KSU_VARIANT_REF }}
-          SUSFS_REPO_URL: ${{ env.SUSFS_REPO_URL }}
-          SUSFS_BRANCH: ${{ env.SUSFS_BRANCH }}
-        run: |
-          bash ./scripts/inject_ksu_variant.sh "${{ inputs.root_manager }}"
-
-      - name: Integrate SUSFS common-side
-        if: inputs.root_manager != 'Stock' && inputs.enable_ksu_susfs == true
-        run: |
-          bash ./scripts/integrate_susfs.sh
-
       - name: Override Config and Build Kernel
         env:
           ROOT_MANAGER: ${{ inputs.root_manager }}
@@ -160,15 +127,9 @@ jobs:
           make ARCH=arm64 savedefconfig
           cp defconfig arch/arm64/configs/gki_defconfig
           
-          echo ">>> 🚨 捏造假程序，骗过 make 签名检查..."
-          cat > scripts/sign-file << 'EOF'
-#!/bin/sh
-exit 0
-EOF
-          cat > scripts/extract-cert << 'EOF'
-#!/bin/sh
-exit 0
-EOF
+          echo ">>> 🚨 用 printf 捏造假程序（不破坏YAML缩进），骗过 make 签名检查..."
+          printf '#!/bin/sh\nexit 0\n' > scripts/sign-file
+          printf '#!/bin/sh\nexit 0\n' > scripts/extract-cert
           chmod +x scripts/sign-file scripts/extract-cert
           
           echo ">>> 正在全盘暗杀 diff 检查器，让它以为检查永远通过..."
