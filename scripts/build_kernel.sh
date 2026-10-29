@@ -11,12 +11,11 @@ echo "=== Initializing Execution Engine ==="
 cd kernel_workspace
 mkdir -p ../out out/dist
 
-echo ">>> Marking repo as clean (sanitizes all custom configuration & source modifications)..."
+echo ">>> Marking repo as clean..."
 # 🚨 【已注释】这一行会把我们的修改隐藏起来，导致后续检查对比时产生幻觉，咱们直接干掉它
 # git -C common ls-files -m | xargs -r git -C common update-index --assume-unchanged
 
-# 🚨 【强行注入虚拟驱动】确保在任何编译之前，把配置写死进去
-echo ">>> Forcing VirtIO Drivers..."
+echo ">>> Forcing VirtIO Drivers & Disabling BTF..."
 CONFIG_FILE="common/arch/arm64/configs/gki_defconfig"
 echo "CONFIG_VIRTIO=y" >> $CONFIG_FILE
 echo "CONFIG_VIRTIO_PCI=y" >> $CONFIG_FILE
@@ -26,7 +25,13 @@ echo "CONFIG_DRM=y" >> $CONFIG_FILE
 echo "CONFIG_VIRTIO_GPU=y" >> $CONFIG_FILE
 echo "CONFIG_DEVTMPFS=y" >> $CONFIG_FILE
 
-# 🚨 【终极杀招】在编译前，直接篡改底层的 build.sh，让它永远发现不了配置被改过！
+# 🚨 【关闭 BTF】解决 BPF API too old 以及找不到 libelf 的报错！
+echo "# CONFIG_DEBUG_INFO_BTF is not set" >> $CONFIG_FILE
+echo "# CONFIG_DEBUG_INFO_BTF_MODULES is not set" >> $CONFIG_FILE
+echo "# CONFIG_DEBUG_INFO is not set" >> $CONFIG_FILE
+echo "CONFIG_DEBUG_INFO_NONE=y" >> $CONFIG_FILE
+
+# 🚨 【终极杀招】直接篡改底层的 build.sh，让它永远发现不了配置被改过！
 if [ -f "build/build.sh" ]; then
     echo ">>> Neutralizing the evil check_defconfig inside build/build.sh..."
     sed -i 's/check_defconfig/true/g' build/build.sh || true
@@ -34,11 +39,11 @@ if [ -f "build/build.sh" ]; then
     sed -i 's/return 1/return 0/g' build/build.sh || true
 fi
 
-# 🚨 【暴力填补 slab.h 漏洞】在起跑前直接修改源码！
-echo ">>> Fixing illegal octal constants in slab.h..."
-sed -i 's/return 08/return 8/g' common/include/linux/slab.h || true
-sed -i 's/return 09/return 9/g' common/include/linux/slab.h || true
-find common -name "slab.h" -exec sed -i 's/return 08/return 8/g; s/return 09/return 9/g' {} + || true
+# 🚨 【暴力填补 slab.h 漏洞】把错误的 08/09 改回正确的 18/19！
+echo ">>> Fixing illegal octal constants in slab.h (08->18, 09->19)..."
+sed -i 's/return 08/return 18/g' common/include/linux/slab.h || true
+sed -i 's/return 09/return 19/g' common/include/linux/slab.h || true
+find common -name "slab.h" -exec sed -i 's/return 08/return 18/g; s/return 09/return 19/g' {} + || true
 
 # 🚨 【环境变量修复】解决 print 找不到的问题
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH

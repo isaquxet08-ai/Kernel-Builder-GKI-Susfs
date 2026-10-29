@@ -78,13 +78,14 @@ jobs:
 
       - name: Fetch Offline Deps from Custom Repo
         run: |
+          export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
           echo ">>> 正在从专属预编译仓库拉取全量依赖..."
           wget -q https://github.com/isaquxet08-ai/Kernel-Deps/releases/latest/download/kernel_deps_full.tar.gz || echo "Fallback to apt"
           if [ -f kernel_deps_full.tar.gz ]; then
             tar -xzf kernel_deps_full.tar.gz
             sudo dpkg -i offline_debs/*.deb || sudo apt-get install -f -y
           fi
-          echo ">>> 在线补齐核心依赖，防止 22.04 缺库..."
+          echo ">>> 在线补齐核心依赖..."
           sudo apt-get update -qq
           sudo apt-get install -y libelf-dev zlib1g-dev libssl-dev bc dwarves pahole
 
@@ -120,6 +121,7 @@ jobs:
         env:
           ROOT_MANAGER: ${{ inputs.root_manager }}
         run: |
+          export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
           cd kernel_workspace/common
           
           echo ">>> 🚨 第一时间掏空 C 源码，彻底剥离 OpenSSL 依赖..."
@@ -142,9 +144,8 @@ jobs:
           mkdir -p certs
           touch certs/signing_key.pem
 
-          echo ">>> 🔧 修复 slab.h 中的非法八进制常量 (08->8, 09->9)..."
-          sed -i 's/return 08;/return 8;/g' include/linux/slab.h || true
-          sed -i 's/return 09;/return 9;/g' include/linux/slab.h || true
+          echo ">>> 🔧 暴力全盘通杀 slab.h 中的非法八进制常量 (08->18, 09->19)..."
+          find . -name "slab.h" -exec sed -i 's/return 08/return 18/g; s/return 09/return 19/g' {} + || true
 
           echo ">>> 正在将根目录的自定义配置覆盖到源码中..."
           cp ../../gki_defconfig arch/arm64/configs/gki_defconfig
