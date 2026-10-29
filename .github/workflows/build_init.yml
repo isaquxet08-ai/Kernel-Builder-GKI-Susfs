@@ -11,7 +11,6 @@ jobs:
     steps:
       - name: Checkout My Repo
         uses: actions/checkout@v4
-        # 🚨 这一步把你的仓库拉下来，这样流水线就能用到你的 patch_init.py 了！
 
       - name: Free Disk Space
         uses: jlumbroso/free-disk-space@main
@@ -29,7 +28,6 @@ jobs:
 
       - name: Sync AOSP Source (Partial)
         run: |
-          # 确保在当前工作区建立 aosp 目录
           mkdir -p aosp
           cd aosp
           repo init -u https://android.googlesource.com/platform/manifest -b android-12.0.0_r1 --depth=1
@@ -45,10 +43,18 @@ jobs:
             platform/prebuilts/clang/host/linux-x86 \
             platform/prebuilts/build-tools
 
-      - name: Apply Patch From Repo Source
+      # 🚨 潘森（Python）人马登场！用你仓库里的文件直接覆盖 AOSP 的源码！
+      - name: Apply Patch From Repo (Python Magic)
         run: |
-          # 🚨 直接执行你放在根目录的 Python 源码！
-          python3 patch_init.py
+          cd aosp
+          # 用你仓库里的魔改版源码，替换掉 AOSP 原本的源码
+          cp ../init_patch_src/first_stage_init.cpp system/core/init/first_stage_init.cpp
+          
+          # 如果你以后写了其他的，也可以加：
+          # cp ../init_patch_src/first_stage_mount.cpp system/core/init/first_stage_mount.cpp
+          # cp ../init_patch_src/init.cpp system/core/init/init.cpp
+          
+          echo "✅ 魔改源码替换成功！"
 
       - name: Build Init
         run: |
