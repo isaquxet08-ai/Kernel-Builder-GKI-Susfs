@@ -1,0 +1,31 @@
+name: Fetch and Release Debian Deps
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-deps:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Download Debs
+        run: |
+          mkdir -p deps
+          cd deps
+          sudo apt-get update -qq
+          # 下载所有内核编译需要的包
+          apt-get download libelf-dev zlib1g-dev dwarves pahole libncurses5-dev bison flex libssl-dev
+          cd ..
+          # 打包成一个压缩包
+          tar -czvf kernel_deps.tar.gz deps/
+
+      - name: Upload to Releases
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: deps-v1.0
+          name: Kernel Dependencies v1.0
+          files: kernel_deps.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
