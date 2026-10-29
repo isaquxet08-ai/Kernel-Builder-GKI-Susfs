@@ -7,9 +7,9 @@ on:
         description: 'Build Channel'
         required: false
         type: choice
-        options: 
+        options:
           - stable
-          - dynamic 
+          - dynamic
           - main
       build_name:
         description: "Build Name"
@@ -34,7 +34,7 @@ on:
         description: "Integrate Root Manager and SUSFS? (Select main channel for kernel root without susfs)"
         required: false
         type: boolean
-        default: true      
+        default: true
       ota_url:
         description: "Full OTA ZIP URL (blank produces AK3 zip)"
         required: false
@@ -50,7 +50,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -122,16 +122,16 @@ jobs:
         run: |
           echo ">>> 正在将根目录的自定义配置覆盖到源码中..."
           cp gki_defconfig kernel_workspace/common/arch/arm64/configs/gki_defconfig
-          
+
           cd kernel_workspace/common
           make ARCH=arm64 savedefconfig
           cp defconfig arch/arm64/configs/gki_defconfig
-          
+
           echo ">>> 🚨 用 printf 捏造假程序（不破坏YAML缩进），骗过 make 签名检查..."
           printf '#!/bin/sh\nexit 0\n' > scripts/sign-file
           printf '#!/bin/sh\nexit 0\n' > scripts/extract-cert
           chmod +x scripts/sign-file scripts/extract-cert
-          
+
           echo ">>> 正在全盘暗杀 diff 检查器，让它以为检查永远通过..."
           grep -rl "check_defconfig" . | xargs sed -i 's/check_defconfig/true/g' || true
           grep -rl "savedefconfig does not match" . | xargs sed -i 's/savedefconfig does not match/IGNORE/g' || true
@@ -154,7 +154,7 @@ jobs:
           cp -f out/Image AnyKernel3-Builder/
           cd AnyKernel3-Builder
           zip -r9 "../out/final/${{ inputs.root_manager }}-${{ inputs.target_version }}-AK3.zip" *
-          
+
       - name: Upload to GitHub Releases
         uses: softprops/action-gh-release@v1
         if: success()
