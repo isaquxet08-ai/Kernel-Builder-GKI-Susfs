@@ -143,6 +143,11 @@ jobs:
           
           mkdir -p certs
           touch certs/signing_key.pem
+          
+          # 🚨 伪造证书文件，解决 canonical-certs.pem 报错
+          mkdir -p debian
+          touch debian/canonical-certs.pem
+          touch debian/canonical-revoked-certs.pem
 
           echo ">>> 🔧 精准修复被老脚本误伤的八进制常量 (08->18, 09->19, 039->139)..."
           find . -name "slab.h" -exec sed -i 's/return 08/return 18/g; s/return 09/return 19/g' {} + || true

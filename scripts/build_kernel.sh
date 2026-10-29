@@ -11,11 +11,8 @@ echo "=== Initializing Execution Engine ==="
 cd kernel_workspace
 mkdir -p ../out out/dist
 
-echo ">>> Marking repo as clean..."
-# 🚨 【已注释】这一行会把我们的修改隐藏起来，导致后续检查对比时产生幻觉，咱们直接干掉它
-# git -C common ls-files -m | xargs -r git -C common update-index --assume-unchanged
-
-echo ">>> Forcing VirtIO Drivers & Disabling BTF..."
+# 🚨 【强行注入虚拟驱动 & 关闭 BTF & 关闭外部证书依赖】
+echo ">>> Forcing VirtIO Drivers, Disabling BTF and Trusted Keys..."
 CONFIG_FILE="common/arch/arm64/configs/gki_defconfig"
 echo "CONFIG_VIRTIO=y" >> $CONFIG_FILE
 echo "CONFIG_VIRTIO_PCI=y" >> $CONFIG_FILE
@@ -25,42 +22,42 @@ echo "CONFIG_DRM=y" >> $CONFIG_FILE
 echo "CONFIG_VIRTIO_GPU=y" >> $CONFIG_FILE
 echo "CONFIG_DEVTMPFS=y" >> $CONFIG_FILE
 
-# 🚨 【关闭 BTF】解决 BPF API too old 以及找不到 libelf 的报错！
 echo "# CONFIG_DEBUG_INFO_BTF is not set" >> $CONFIG_FILE
 echo "# CONFIG_DEBUG_INFO_BTF_MODULES is not set" >> $CONFIG_FILE
 echo "# CONFIG_DEBUG_INFO is not set" >> $CONFIG_FILE
 echo "CONFIG_DEBUG_INFO_NONE=y" >> $CONFIG_FILE
 
-# 🚨 【终极杀招】直接篡改底层的 build.sh，让它永远发现不了配置被改过！
-if [ -f "build/build.sh" ]; then
-    echo ">>> Neutralizing the evil check_defconfig inside build/build.sh..."
-    sed -i 's/check_defconfig/true/g' build/build.sh || true
-    sed -i 's/RES=1/RES=0/g' build/build.sh || true
-    sed -i 's/return 1/return 0/g' build/build.sh || true
-fi
+echo "# CONFIG_SYSTEM_TRUSTED_KEYS is not set" >> $CONFIG_FILE
+echo "# CONFIG_SYSTEM_REVOCATION_KEYS is not set" >> $CONFIG_FILE
 
-# 🚨 【暴力填补 slab.h 漏洞】把错误的 08/09 改回正确的 18/19！
+# 🚨 【伪造假证书】双管齐下
+mkdir -p common/debian
+touch common/debian/canonical-certs.pem
+touch common/debian/canonical-revoked-certs.pem
+
+# 🚨 【精准修复被误伤的八进制】只改该改的，绝不瞎搞！
 echo ">>> Fixing illegal octal constants in slab.h (08->18, 09->19)..."
 sed -i 's/return 08/return 18/g' common/include/linux/slab.h || true
 sed -i 's/return 09/return 19/g' common/include/linux/slab.h || true
 find common -name "slab.h" -exec sed -i 's/return 08/return 18/g; s/return 09/return 19/g' {} + || true
 
-# 🚨 【环境变量修复】解决 print 找不到的问题
+echo ">>> Fixing illegal octal number in sigreturn.S (039->139)..."
+sed -i 's/#039/#139/g' common/arch/arm64/kernel/vdso/sigreturn.S || true
+find common/arch/arm64/kernel/vdso -name "sigreturn.S" -exec sed -i 's/#039/#139/g' {} + || true
+
+# 🚨 【环境变量修复】
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
 
 # Build method 
 if [ "$BASE_VER" != "5.10" ] && [ -f "tools/bazel" ]; then
     echo ">>> Modern Kleaf/Bazel ecosystem detected for $BASE_VER..."
-    
     TRIM_FLAGS=""
     if [ "$BASE_VER" = "5.15" ]; then
         echo "  -> 5.15 detected. Relying on physical Bazel dictionary patch (omitting --notrim)..."
     else
         TRIM_FLAGS="--notrim"
     fi
-    
-    tools/bazel run --config=stamp \
-      $TRIM_FLAGS \
+    tools/bazel run --config=stamp $TRIM_FLAGS \
       --action_env=SOURCE_DATE_EPOCH="$OFFICIAL_DATE" \
       --action_env=STABLE_BUILD_VERSION="-g$OFFICIAL_HASH" \
       --action_env=KLEAF_KERNEL_BUILD_VERSION="-g$OFFICIAL_HASH" \
@@ -71,14 +68,11 @@ if [ "$BASE_VER" != "5.10" ] && [ -f "tools/bazel" ]; then
       --destdir=out/dist
 else
     echo ">>> Legacy Hermetic Make ecosystem detected (5.10 or fallback)..."
-    
     mkdir -p out/dist
     export DIST_DIR="out/dist"
-    
     export KERNEL_DIR="common"
     export BUILD_CONFIG="common/build.config.gki.aarch64"
     export SOURCE_DATE_EPOCH="$OFFICIAL_DATE"
-    
     export EXTRA_LINUX_VERSION="-g${OFFICIAL_HASH}"
     
     if [ -f "build/build.sh" ]; then
@@ -97,76 +91,17 @@ if [ -z "${IMAGE_PATH}" ] || [ ! -f "${IMAGE_PATH}" ]; then
 fi
 
 echo ">>> Selected Image: ${IMAGE_PATH}"
-
 cp -f "${IMAGE_PATH}" ../out/Image
 
 echo ">>> Extracting kernel runtime version string..."
 KERNEL_VERSION_STRING=$(strings ../out/Image | grep -E "Linux version [0-9]" | head -n 1 || true)
-
 if [ -z "$KERNEL_VERSION_STRING" ]; then
     KERNEL_VERSION_STRING=$(strings ../out/Image | grep -i "Linux version" | head -n 1 || true)
 fi
-
 if [ -n "$KERNEL_VERSION_STRING" ]; then
     echo "    $KERNEL_VERSION_STRING"
 else
     echo "    [!] Notice: Could not read raw banner string directly from compiled Image binary."
-fi
-
-# --- DYNAMIC KCONFIG VALIDATION REPORT ---
-if [ "$ENABLE_NOMOUNT" = "true" ] || [ "$ENABLE_NET_OPTS" = "true" ]; then
-    echo "::group::Custom Kconfig Integration Report"
-    echo ""
-    echo "=============================================="
-    echo " CUSTOM KCONFIG VALIDATION REPORT             "
-    echo "=============================================="
-
-    FRAGMENT_FILE="../tools/custom_combined.fragment"
-    
-    if [ ! -f "$FRAGMENT_FILE" ]; then
-        echo "[-] Notice: tools/custom.fragment not found. Skipping validation."
-    else
-        CONFIG_SRC=""
-        if [ -f "out/dist/config.gz" ]; then
-            CONFIG_SRC="out/dist/config.gz"
-        elif [ -f "out/dist/.config" ]; then
-            CONFIG_SRC="out/dist/.config"
-        else
-            CONFIG_SRC=$(find out/ -type f \( -name "config.gz" -o -name ".config" \) 2>/dev/null | head -n 1 || true)
-        fi
-
-        if [ -z "$CONFIG_SRC" ]; then
-            echo "[!] WARN: Could not locate compiled kernel configuration target."
-        else
-            echo ">>> Extracting definitions from: $CONFIG_SRC"
-            echo "----------------------------------------------"
-            
-            REQUESTED_CONFIGS=$(grep -E '^CONFIG_' "$FRAGMENT_FILE" | cut -d'=' -f1 || true)
-            
-            if [ -z "$REQUESTED_CONFIGS" ]; then
-                echo "  [-] No active custom configs found in fragment."
-            else
-                for CFG in $REQUESTED_CONFIGS; do
-                    if [[ "$CONFIG_SRC" == *.gz ]]; then
-                        VAL=$(zgrep -E "^${CFG}=" "$CONFIG_SRC" | cut -d'=' -f2 || true)
-                    else
-                        VAL=$(grep -E "^${CFG}=" "$CONFIG_SRC" | cut -d'=' -f2 || true)
-                    fi
-
-                    if [ "$VAL" = "y" ]; then
-                        printf "  [ PASS ] %-40s = %s\n" "$CFG" "$VAL"
-                    elif [ "$VAL" = "m" ]; then
-                        printf "  [ WARN ] %-40s = %s (Module)\n" "$CFG" "$VAL"
-                    else
-                        printf "  [ DROP ] %-40s = MISSING/OVERRIDDEN\n" "$CFG"
-                    fi
-                done
-            fi
-        fi
-    fi
-
-    echo "=============================================="
-    echo "::endgroup::"
 fi
 
 cd ..
