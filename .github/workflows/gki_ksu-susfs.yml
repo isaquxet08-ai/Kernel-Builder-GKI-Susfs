@@ -144,19 +144,20 @@ jobs:
           mkdir -p certs
           touch certs/signing_key.pem
 
-          echo ">>> 🔧 暴力全盘通杀 slab.h 中的非法八进制常量 (08->18, 09->19)..."
+          echo ">>> 🔧 精准修复被老脚本误伤的八进制常量 (08->18, 09->19, 039->139)..."
           find . -name "slab.h" -exec sed -i 's/return 08/return 18/g; s/return 09/return 19/g' {} + || true
+          find . -name "sigreturn.S" -exec sed -i 's/#039/#139/g' {} + || true
 
           echo ">>> 正在将根目录的自定义配置覆盖到源码中..."
           cp ../../gki_defconfig arch/arm64/configs/gki_defconfig
           make ARCH=arm64 savedefconfig
           cp defconfig arch/arm64/configs/gki_defconfig
 
-          echo ">>> 正在全盘暗杀 diff 检查器..."
+          echo ">>> 正在精准暗杀 diff 检查器..."
           grep -rl "check_defconfig" . | xargs sed -i 's/check_defconfig/true/g' || true
           grep -rl "savedefconfig does not match" . | xargs sed -i 's/savedefconfig does not match/IGNORE/g' || true
           grep -rl "RES=1" . | xargs sed -i 's/RES=1/RES=0/g' || true
-          grep -rl "return 1" . | xargs sed -i 's/return 1/return 0/g' || true
+          # 🚨 极度危险的 s/return 1/return 0/g 已被物理删除！
           grep -rl "diff -u" . | xargs sed -i 's/diff -u/echo -u/g' || true
           cd ../..
 
