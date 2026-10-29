@@ -4,11 +4,62 @@ on:
   workflow_dispatch:
     inputs:
       build_name:
+        description: "Build Name (构建名称)"
         required: true
+        type: string
+        default: "android12-5.10"
       target_version:
+        description: "Kernel Version (内核版本)"
         required: true
+        type: string
+        default: "5.10.272"
       root_manager:
+        description: "Root Environment (Root 管理器)"
         required: true
+        type: choice
+        options:
+          - Stock
+          - KernelSU
+          - KernelSU-Next
+          - SukiSU-Ultra
+          - BakaSU
+      enable_ksu_susfs:
+        description: "Integrate SUSFS? (是否集成SUSFS)"
+        required: false
+        type: boolean
+        default: false
+      # 🚨 我们的自定义模块选项
+      build_type:
+        description: 'Build Type (编译模式)'
+        required: true
+        type: choice
+        default: 'base'
+        options:
+          - base        # 基础组（只保留 VirtIO，砍掉实体硬件）
+          - full        # 完整版（全量编译）
+      enable_wlan:
+        description: 'Enable WLAN/Wi-Fi? (是否保留实体Wi-Fi模块)'
+        required: false
+        type: boolean
+        default: false
+      enable_bt:
+        description: 'Enable Bluetooth? (是否保留蓝牙模块)'
+        required: false
+        type: boolean
+        default: false
+      enable_gpu:
+        description: 'Enable Physical GPU? (是否保留AMD/Intel显卡)'
+        required: false
+        type: boolean
+        default: false
+      enable_media:
+        description: 'Enable Media/Sound? (是否保留电视卡/声卡)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -64,15 +115,26 @@ jobs:
       - name: Build Kernel
         env:
           BASE_VER: "5.10"
+          BUILD_TYPE: ${{ inputs.build_type }}
+          ENABLE_WLAN: ${{ inputs.enable_wlan }}
+          ENABLE_BT: ${{ inputs.enable_bt }}
+          ENABLE_GPU: ${{ inputs.enable_gpu }}
+          ENABLE_MEDIA: ${{ inputs.enable_media }}
+          ROOT_MANAGER: ${{ inputs.root_manager }}
         run: |
-          bash ../scripts/build_kernel.sh
+          cd $GITHUB_WORKSPACE
+          # 如果选了非 Stock 版本，可以在这里预留注入 KSU 的脚本位置
+          # if [ "$ROOT_MANAGER" != "Stock" ]; then ... fi
+          
+          bash ./scripts/build_kernel.sh
 
       - name: Prepare Final Artifacts
         if: always()
         run: |
+          cd $GITHUB_WORKSPACE
           mkdir -p out/final
-          IMG=$(find /mnt/workspace /home/runner/work -name "Image" -type f 2>/dev/null | head -n 1)
-          SYMVERS=$(find /mnt/workspace /home/runner/work -name "Module.symvers" -type f 2>/dev/null | head -n 1)
+          IMG=$(find /mnt/workspace $GITHUB_WORKSPACE -name "Image" -type f 2>/dev/null | head -n 1)
+          SYMVERS=$(find /mnt/workspace $GITHUB_WORKSPACE -name "Module.symvers" -type f 2>/dev/null | head -n 1)
           
           if [ -n "$IMG" ]; then
               echo "✅ 捞到 Image: $IMG"
