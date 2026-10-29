@@ -3,12 +3,16 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write # 🚨 必须给写入权限才能传 Releases
+  contents: write
 
 jobs:
   build-init:
     runs-on: ubuntu-22.04
     steps:
+      - name: Checkout My Repo
+        uses: actions/checkout@v4
+        # 🚨 这一步把你的仓库拉下来，这样流水线就能用到你的 patch_init.py 了！
+
       - name: Free Disk Space
         uses: jlumbroso/free-disk-space@main
         with:
@@ -25,9 +29,8 @@ jobs:
 
       - name: Sync AOSP Source (Partial)
         run: |
-          sudo mkdir -p /mnt/aosp
-          sudo chown -R $USER:$USER /mnt/aosp
-          ln -s /mnt/aosp aosp
+          # 确保在当前工作区建立 aosp 目录
+          mkdir -p aosp
           cd aosp
           repo init -u https://android.googlesource.com/platform/manifest -b android-12.0.0_r1 --depth=1
           repo sync -c --no-tags --no-clone-bundle -j$(nproc) \
@@ -42,64 +45,25 @@ jobs:
             platform/prebuilts/clang/host/linux-x86 \
             platform/prebuilts/build-tools
 
-      - name: Patch Init Source Code (Idempotent Mount Magic)
+      - name: Apply Patch From Repo Source
         run: |
-          cd /mnt/aosp
-          cat > patch_init.py << 'PYEOF'
-          import os
-          import re
-
-          def patch_file(filepath):
-              if not os.path.exists(filepath): return
-              with open(filepath, 'r') as f:
-                  content = f.read()
-
-              # 1. 致命错误降级
-              content = content.replace('LOG(FATAL)', 'LOG(WARNING)')
-              content = content.replace('PLOG(FATAL)', 'PLOG(WARNING)')
-              
-              # 2. 暴力解除 abort
-              content = content.replace('abort();', '/* abort disabled */')
-              content = content.replace('return false;', 'return true; /* ignored */')
-              
-              # 3. 宽容挂载失败
-              pattern = r'if\s*\(\s*(mount\s*\([^;]+?\))\s*!=\s*0\s*\)'
-              replacement = r'if (\1 != 0 && errno != EBUSY && errno != ENOENT)'
-              content = re.sub(pattern, replacement, content)
-
-              # 4. 强行无视 sysfs 挂载失败
-              content = re.sub(r'if\s*\(\s*mount\(\s*"sysfs",\s*"/sys".*?\)\s*<\s*0\s*\)', 
-                               'if (false) /* ignore sysfs mount error */', content)
-
-              with open(filepath, 'w') as f:
-                  f.write(content)
-              print(f"✅ 已修补: {filepath}")
-
-          print(">>> 开始对 init 源码打补丁...")
-          patch_file('system/core/init/first_stage_init.cpp')
-          patch_file('system/core/init/first_stage_mount.cpp')
-          patch_file('system/core/init/init.cpp')
-          print(">>> 补丁全部注入成功！")
-          PYEOF
-          
+          # 🚨 直接执行你放在根目录的 Python 源码！
           python3 patch_init.py
 
       - name: Build Init
         run: |
-          cd /mnt/aosp
+          cd aosp
           source build/envsetup.sh
           lunch aosp_arm64-userdebug
           m init -j$(nproc)
 
-      # 🚨 核心：强行打包上传到 Releases！
       - name: Upload Modded Init to Releases
         if: always()
         uses: softprops/action-gh-release@v1
         with:
           tag_name: init-build-${{ github.run_number }}
           name: Modded Init Build ${{ github.run_number }}
-          # 把编译出来的 init 放进去，顺便把你想要的挂载表也写一份放在一起
           files: |
-            /mnt/aosp/out/target/product/generic_arm64/system/bin/init
+            aosp/out/target/product/generic_arm64/system/bin/init
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
