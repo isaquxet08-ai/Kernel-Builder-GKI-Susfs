@@ -5,13 +5,14 @@ on:
     inputs:
       build_name:
         required: true
-        default: "android12-5.10"
+        default: "vda_final"
       target_version:
         required: true
         default: "5.10.272"
       root_manager:
         required: true
         type: choice
+        default: 'Stock'
         options:
           - Stock
           - KernelSU
@@ -27,7 +28,7 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Free Disk Space (Ubuntu)
+      - name: Free Disk Space
         uses: jlumbroso/free-disk-space@main
         with:
           android: false
@@ -46,8 +47,7 @@ jobs:
           sudo mkswap /swapfile
           sudo swapon /swapfile
 
-      # 🚨 核心回归：强制拉取你专属的离线依赖包
-      - name: Fetch Offline Deps from Custom Repo
+      - name: Fetch Offline Deps
         run: |
           echo ">>> 正在从专属预编译仓库拉取全量依赖..."
           wget -q https://github.com/isaquxet08-ai/Kernel-Deps/releases/latest/download/kernel_deps_full.tar.gz || echo "Fallback to apt"
@@ -55,9 +55,10 @@ jobs:
             tar -xzf kernel_deps_full.tar.gz
             sudo dpkg -i offline_debs/*.deb || sudo apt-get install -f -y
           fi
-          echo ">>> 在线补齐核心依赖，防止 22.04 缺库..."
+          echo ">>> 在线补齐核心依赖及编译器..."
           sudo apt-get update -qq
-          sudo apt-get install -y libelf-dev zlib1g-dev libssl-dev bc dwarves pahole bison flex
+          # 🚨 核心修复：补上 clang lld llvm 等底层编译工具
+          sudo apt-get install -y libelf-dev zlib1g-dev libssl-dev bc dwarves pahole bison flex clang lld llvm
 
       - name: Setup repo tool
         run: |
