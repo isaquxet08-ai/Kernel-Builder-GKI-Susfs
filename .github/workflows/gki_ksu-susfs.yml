@@ -88,6 +88,16 @@ jobs:
             sudo apt-get install -y libelf-dev zlib1g-dev dwarves pahole libncurses5-dev bison flex libssl-dev
           fi
 
+      - name: Force Install OpenSSL 1.1 (Android 12 刚需)
+        run: |
+          echo ">>> 🚨 强行拉取并安装 Ubuntu 20.04 的 OpenSSL 1.1 库..."
+          wget http://security.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2.24_amd64.deb || true
+          wget http://security.ubuntu.com/ubuntu/pool/main/o/openssl/libssl-dev_1.1.1f-1ubuntu2.24_amd64.deb || true
+          sudo dpkg -i --force-all libssl1.1_*.deb libssl-dev_*.deb || true
+          sudo apt-get install -f -y || true
+          echo ">>> 当前系统 OpenSSL 版本："
+          openssl version
+
       - name: Resolve Manifest Branch from Database
         id: resolve_manifest
         run: |
