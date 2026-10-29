@@ -1,0 +1,100 @@
+name: Compile Modded Android Init
+on:
+  workflow_dispatch:
+
+jobs:
+  build-init:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Free Disk Space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          android: false
+          dotnet: true
+          haskell: true
+
+      - name: Setup repo tool
+        run: |
+          mkdir -p "$HOME/bin"
+          curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo -o "$HOME/bin/repo"
+          chmod +x "$HOME/bin/repo"
+          echo "$HOME/bin" >> $GITHUB_PATH
+
+      - name: Sync AOSP Source (Partial)
+        run: |
+          sudo mkdir -p /mnt/aosp
+          sudo chown -R $USER:$USER /mnt/aosp
+          ln -s /mnt/aosp aosp
+          cd aosp
+          repo init -u https://android.googlesource.com/platform/manifest -b android-12.0.0_r1 --depth=1
+          # 只同步 init 源码及其依赖
+          repo sync -c --no-tags --no-clone-bundle -j$(nproc) \
+            platform/system/core \
+            platform/system/libbase \
+            platform/system/logging \
+            platform/system/libcutils \
+            platform/system/libselinux \
+            platform/system/sepolicy \
+            platform/build/soong \
+            platform/build/make \
+            platform/prebuilts/clang/host/linux-x86 \
+            platform/prebuilts/build-tools
+
+      - name: Patch Init Source Code (Python Magic)
+        run: |
+          cd /mnt/aosp
+          # 🚨 用 cat 写一个 Python 脚本，全量替换报错逻辑！
+          cat > patch_init.py << 'PYEOF'
+          import os
+          import re
+
+          # 1. 修改 first_stage_init.cpp
+          file1 = 'system/core/init/first_stage_init.cpp'
+          if os.path.exists(file1):
+              with open(file1, 'r') as f:
+                  content = f.read()
+              # 把致命的 LOG(FATAL) 全降级为 WARNING，让它绝对不 abort
+              content = content.replace('LOG(FATAL)', 'LOG(WARNING)')
+              content = content.replace('abort()', 'return 1;')
+              with open(file1, 'w') as f:
+                  f.write(content)
+              print(f"Patched {file1}")
+
+          # 2. 修改 first_stage_mount.cpp
+          file2 = 'system/core/init/first_stage_mount.cpp'
+          if os.path.exists(file2):
+              with open(file2, 'r') as f:
+                  content = f.read()
+              # 无视所有挂载失败的情况
+              content = content.replace('return false;', 'return true; /* Ignored */')
+              content = content.replace('LOG(FATAL)', 'LOG(WARNING)')
+              with open(file2, 'w') as f:
+                  f.write(content)
+              print(f"Patched {file2}")
+
+          # 3. 修改 init.cpp (主逻辑)
+          file3 = 'system/core/init/init.cpp'
+          if os.path.exists(file3):
+              with open(file3, 'r') as f:
+                  content = f.read()
+              content = content.replace('LOG(FATAL)', 'LOG(WARNING)')
+              with open(file3, 'w') as f:
+                  f.write(content)
+              print(f"Patched {file3}")
+          PYEOF
+          
+          python3 patch_init.py
+
+      - name: Build Init
+        run: |
+          cd /mnt/aosp
+          source build/envsetup.sh
+          lunch aosp_arm64-userdebug
+          m init -j$(nproc)
+
+      - name: Upload Patched Init
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: modded-init
+          path: /mnt/aosp/out/target/product/generic_arm64/system/bin/init
