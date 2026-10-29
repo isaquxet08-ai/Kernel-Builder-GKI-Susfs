@@ -11,8 +11,8 @@ echo "=== Initializing Execution Engine ==="
 cd kernel_workspace
 mkdir -p ../out out/dist
 
-# 🚨 【强行注入虚拟驱动 & 关闭 BTF & 关闭外部证书依赖】
-echo ">>> Forcing VirtIO Drivers, Disabling BTF and Trusted Keys..."
+# 🚨 【强行注入虚拟驱动 & 关闭各种会导致编译失败的冗余功能】
+echo ">>> Forcing VirtIO Drivers, Disabling BTF, Certs and IKHEADERS..."
 CONFIG_FILE="common/arch/arm64/configs/gki_defconfig"
 echo "CONFIG_VIRTIO=y" >> $CONFIG_FILE
 echo "CONFIG_VIRTIO_PCI=y" >> $CONFIG_FILE
@@ -22,20 +22,25 @@ echo "CONFIG_DRM=y" >> $CONFIG_FILE
 echo "CONFIG_VIRTIO_GPU=y" >> $CONFIG_FILE
 echo "CONFIG_DEVTMPFS=y" >> $CONFIG_FILE
 
+# 关闭 BTF
 echo "# CONFIG_DEBUG_INFO_BTF is not set" >> $CONFIG_FILE
 echo "# CONFIG_DEBUG_INFO_BTF_MODULES is not set" >> $CONFIG_FILE
 echo "# CONFIG_DEBUG_INFO is not set" >> $CONFIG_FILE
 echo "CONFIG_DEBUG_INFO_NONE=y" >> $CONFIG_FILE
 
+# 关闭外部证书
 echo "# CONFIG_SYSTEM_TRUSTED_KEYS is not set" >> $CONFIG_FILE
 echo "# CONFIG_SYSTEM_REVOCATION_KEYS is not set" >> $CONFIG_FILE
 
-# 🚨 【伪造假证书】双管齐下
+# 🚨 【关键修复】关闭 IKHEADERS，防止 tar.xz 打包报错！
+echo "# CONFIG_IKHEADERS is not set" >> $CONFIG_FILE
+
+# 🚨 【伪造假证书】
 mkdir -p common/debian
 touch common/debian/canonical-certs.pem
 touch common/debian/canonical-revoked-certs.pem
 
-# 🚨 【精准修复被误伤的八进制】只改该改的，绝不瞎搞！
+# 🚨 【精准修复被误伤的八进制】
 echo ">>> Fixing illegal octal constants in slab.h (08->18, 09->19)..."
 sed -i 's/return 08/return 18/g' common/include/linux/slab.h || true
 sed -i 's/return 09/return 19/g' common/include/linux/slab.h || true
