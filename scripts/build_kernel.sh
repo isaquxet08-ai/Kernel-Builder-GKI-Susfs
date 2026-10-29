@@ -34,6 +34,15 @@ if [ -f "build/build.sh" ]; then
     sed -i 's/return 1/return 0/g' build/build.sh || true
 fi
 
+# 🚨 【暴力填补 slab.h 漏洞】在起跑前直接修改源码！
+echo ">>> Fixing illegal octal constants in slab.h..."
+sed -i 's/return 08/return 8/g' common/include/linux/slab.h || true
+sed -i 's/return 09/return 9/g' common/include/linux/slab.h || true
+find common -name "slab.h" -exec sed -i 's/return 08/return 8/g; s/return 09/return 9/g' {} + || true
+
+# 🚨 【环境变量修复】解决 print 找不到的问题
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
+
 # Build method 
 if [ "$BASE_VER" != "5.10" ] && [ -f "tools/bazel" ]; then
     echo ">>> Modern Kleaf/Bazel ecosystem detected for $BASE_VER..."
