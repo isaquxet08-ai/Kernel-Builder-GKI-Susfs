@@ -11,7 +11,6 @@ echo "=== Initializing Execution Engine ==="
 cd kernel_workspace
 mkdir -p ../out out/dist
 
-# 🚨 【强行注入虚拟驱动 & 关闭冗余功能】
 echo ">>> Forcing VirtIO Drivers, Disabling BTF, Certs, IKHEADERS and MODULE_SIG..."
 CONFIG_FILE="common/arch/arm64/configs/gki_defconfig"
 echo "CONFIG_VIRTIO=y" >> $CONFIG_FILE
@@ -32,7 +31,7 @@ echo "# CONFIG_SYSTEM_REVOCATION_KEYS is not set" >> $CONFIG_FILE
 echo "# CONFIG_IKHEADERS is not set" >> $CONFIG_FILE
 echo "# CONFIG_MODULE_SIG is not set" >> $CONFIG_FILE
 
-# 🚨 【伪造假证书与空壳二进制文件】彻底骗过汇编和 Makefile 检查
+# 🚨 【伪造所有证书空文件】彻底骗过底层汇编的 .incbin 检查
 mkdir -p common/debian
 touch common/debian/canonical-certs.pem
 touch common/debian/canonical-revoked-certs.pem
@@ -41,8 +40,8 @@ mkdir -p common/certs
 touch common/certs/signing_key.pem
 touch common/certs/signing_key.x509
 touch common/certs/x509_certificate_list
+touch common/certs/x509_revocation_list
 
-# 🚨 【精准修复被误伤的八进制】
 echo ">>> Fixing illegal octal constants in slab.h (08->18, 09->19)..."
 sed -i 's/return 08/return 18/g' common/include/linux/slab.h || true
 sed -i 's/return 09/return 19/g' common/include/linux/slab.h || true
@@ -52,15 +51,13 @@ echo ">>> Fixing illegal octal number in sigreturn.S (039->139)..."
 sed -i 's/#039/#139/g' common/arch/arm64/kernel/vdso/sigreturn.S || true
 find common/arch/arm64/kernel/vdso -name "sigreturn.S" -exec sed -i 's/#039/#139/g' {} + || true
 
-# 🚨 【环境变量修复】
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
 
-# Build method 
 if [ "$BASE_VER" != "5.10" ] && [ -f "tools/bazel" ]; then
     echo ">>> Modern Kleaf/Bazel ecosystem detected for $BASE_VER..."
     TRIM_FLAGS=""
     if [ "$BASE_VER" = "5.15" ]; then
-        echo "  -> 5.15 detected. Relying on physical Bazel dictionary patch (omitting --notrim)..."
+        TRIM_FLAGS=""
     else
         TRIM_FLAGS="--notrim"
     fi
@@ -83,33 +80,15 @@ else
     export EXTRA_LINUX_VERSION="-g${OFFICIAL_HASH}"
     
     if [ -f "build/build.sh" ]; then
-        echo "[+] Invoking build/build.sh..."
         bash build/build.sh
     else
-        echo "[-] ERROR: Legacy build/build.sh orchestrator not found!" >&2
         exit 1
     fi
 fi
 
 IMAGE_PATH="$(find out/dist -type f -name 'Image' -print -quit)"
 if [ -z "${IMAGE_PATH}" ] || [ ! -f "${IMAGE_PATH}" ]; then
-  echo "[-] No compilation Image produced!" >&2
-  exit 1
+    exit 1
 fi
-
-echo ">>> Selected Image: ${IMAGE_PATH}"
 cp -f "${IMAGE_PATH}" ../out/Image
-
-echo ">>> Extracting kernel runtime version string..."
-KERNEL_VERSION_STRING=$(strings ../out/Image | grep -E "Linux version [0-9]" | head -n 1 || true)
-if [ -z "$KERNEL_VERSION_STRING" ]; then
-    KERNEL_VERSION_STRING=$(strings ../out/Image | grep -i "Linux version" | head -n 1 || true)
-fi
-if [ -n "$KERNEL_VERSION_STRING" ]; then
-    echo "    $KERNEL_VERSION_STRING"
-else
-    echo "    [!] Notice: Could not read raw banner string directly from compiled Image binary."
-fi
-
 cd ..
-echo ">>> Build execution loop completed"
