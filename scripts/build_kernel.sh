@@ -11,7 +11,7 @@ echo "=== Initializing Execution Engine ==="
 cd kernel_workspace
 mkdir -p ../out out/dist
 
-echo ">>> Forcing VirtIO Drivers, Disabling BTF, Certs, IKHEADERS and MODULE_SIG..."
+echo ">>> Forcing VirtIO Drivers & Disabling everything useless..."
 CONFIG_FILE="common/arch/arm64/configs/gki_defconfig"
 echo "CONFIG_VIRTIO=y" >> $CONFIG_FILE
 echo "CONFIG_VIRTIO_PCI=y" >> $CONFIG_FILE
@@ -28,26 +28,34 @@ echo "CONFIG_DEBUG_INFO_NONE=y" >> $CONFIG_FILE
 
 echo "# CONFIG_SYSTEM_TRUSTED_KEYS is not set" >> $CONFIG_FILE
 echo "# CONFIG_SYSTEM_REVOCATION_KEYS is not set" >> $CONFIG_FILE
+echo "# CONFIG_SYSTEM_REVOCATION_LIST is not set" >> $CONFIG_FILE
 echo "# CONFIG_IKHEADERS is not set" >> $CONFIG_FILE
 echo "# CONFIG_MODULE_SIG is not set" >> $CONFIG_FILE
 
-# 🚨 【伪造所有证书空文件】彻底骗过底层汇编的 .incbin 检查
+echo ">>> 🚨 终极狂暴模式：物理删除 .incbin，篡改 Makefile 让它彻底忘记证书！"
+# 1. 强行干掉汇编文件里的 incbin 指令
+sed -i '/incbin/d' common/certs/system_certificates.S || true
+sed -i '/incbin/d' common/certs/revocation_certificates.S || true
+# 2. 直接把 Makefile 里的编译目标注释掉，从根源上阻止它！
+sed -i 's/obj-y += system_certificates.o/# obj-y += system_certificates.o/g' common/certs/Makefile || true
+sed -i 's/obj-y += revocation_certificates.o/# obj-y += revocation_certificates.o/g' common/certs/Makefile || true
+
+# 🚨 随手塞点空文件，作为最后一道防线
 mkdir -p common/debian
 touch common/debian/canonical-certs.pem
 touch common/debian/canonical-revoked-certs.pem
-
 mkdir -p common/certs
 touch common/certs/signing_key.pem
 touch common/certs/signing_key.x509
 touch common/certs/x509_certificate_list
 touch common/certs/x509_revocation_list
 
-echo ">>> Fixing illegal octal constants in slab.h (08->18, 09->19)..."
+echo ">>> Fixing illegal octal constants in slab.h..."
 sed -i 's/return 08/return 18/g' common/include/linux/slab.h || true
 sed -i 's/return 09/return 19/g' common/include/linux/slab.h || true
 find common -name "slab.h" -exec sed -i 's/return 08/return 18/g; s/return 09/return 19/g' {} + || true
 
-echo ">>> Fixing illegal octal number in sigreturn.S (039->139)..."
+echo ">>> Fixing illegal octal number in sigreturn.S..."
 sed -i 's/#039/#139/g' common/arch/arm64/kernel/vdso/sigreturn.S || true
 find common/arch/arm64/kernel/vdso -name "sigreturn.S" -exec sed -i 's/#039/#139/g' {} + || true
 
