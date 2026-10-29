@@ -83,11 +83,10 @@ jobs:
           if [ -f kernel_deps_full.tar.gz ]; then
             tar -xzf kernel_deps_full.tar.gz
             sudo dpkg -i offline_debs/*.deb || sudo apt-get install -f -y
-          else
-            sudo apt-get update -qq
-            sudo apt-get install -y libelf-dev zlib1g-dev dwarves pahole libncurses5-dev bison flex libssl-dev
           fi
-          sudo apt-get install -y libelf-dev zlib1g-dev libssl-dev bc
+          echo ">>> 在线补齐核心依赖，防止 22.04 缺库..."
+          sudo apt-get update -qq
+          sudo apt-get install -y libelf-dev zlib1g-dev libssl-dev bc dwarves pahole
 
       - name: Resolve Manifest Branch from Database
         id: resolve_manifest
@@ -143,6 +142,10 @@ jobs:
           mkdir -p certs
           touch certs/signing_key.pem
 
+          echo ">>> 🔧 修复 slab.h 中的非法八进制常量 (08->8, 09->9)..."
+          sed -i 's/return 08;/return 8;/g' include/linux/slab.h || true
+          sed -i 's/return 09;/return 9;/g' include/linux/slab.h || true
+
           echo ">>> 正在将根目录的自定义配置覆盖到源码中..."
           cp ../../gki_defconfig arch/arm64/configs/gki_defconfig
           make ARCH=arm64 savedefconfig
@@ -156,7 +159,7 @@ jobs:
           grep -rl "diff -u" . | xargs sed -i 's/diff -u/echo -u/g' || true
           cd ../..
 
-          echo ">>> 掏空战术完成，开始正式编译..."
+          echo ">>> 修复完毕，开始正式编译..."
           OFFICIAL_HASH=${{ env.OFFICIAL_HASH }} \
           OFFICIAL_DATE=${{ env.OFFICIAL_DATE }} \
           bash ./scripts/build_kernel.sh
