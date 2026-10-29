@@ -11,10 +11,10 @@ echo "=== Initializing Execution Engine ==="
 cd kernel_workspace
 mkdir -p ../out out/dist
 
-echo ">>> 🚨 注入 VirtIO 全家桶，开启极简模式，拉黑无用模块..."
 CONFIG_FILE="common/arch/arm64/configs/gki_defconfig"
 
-# 1. VirtIO 核心框架与硬件
+echo ">>> 🚨 注入核心白名单 (VirtIO 全家桶全部 =y 编进内核)..."
+# 必须的核心驱动
 echo "CONFIG_VIRTIO=y" >> $CONFIG_FILE
 echo "CONFIG_VIRTIO_PCI=y" >> $CONFIG_FILE
 echo "CONFIG_VIRTIO_MMIO=y" >> $CONFIG_FILE
@@ -24,13 +24,35 @@ echo "CONFIG_DRM=y" >> $CONFIG_FILE
 echo "CONFIG_DRM_VIRTIO_GPU=y" >> $CONFIG_FILE
 echo "CONFIG_SOUND=y" >> $CONFIG_FILE
 echo "CONFIG_SND_VIRTIO=y" >> $CONFIG_FILE
-
-# 2. 基础文件系统
+# 必须的底层系统支持
 echo "CONFIG_EXT4_FS=y" >> $CONFIG_FILE
 echo "CONFIG_DEVTMPFS=y" >> $CONFIG_FILE
 echo "CONFIG_TMPFS=y" >> $CONFIG_FILE
+echo "CONFIG_NET=y" >> $CONFIG_FILE
 
-# 3. 关闭报错校验
+echo ">>> 🚨 注入超级黑名单 (彻底斩断无用外设)..."
+# 1. 斩断电视卡、多媒体、服务器 RAID 等万恶之源
+echo "# CONFIG_MEDIA_SUPPORT is not set" >> $CONFIG_FILE
+echo "# CONFIG_MD is not set" >> $CONFIG_FILE
+echo "# CONFIG_HWMON is not set" >> $CONFIG_FILE
+echo "# CONFIG_INFINIBAND is not set" >> $CONFIG_FILE
+echo "# CONFIG_ISDN is not set" >> $CONFIG_FILE
+echo "# CONFIG_HAMRADIO is not set" >> $CONFIG_FILE
+echo "# CONFIG_CAN is not set" >> $CONFIG_FILE
+echo "# CONFIG_NFC is not set" >> $CONFIG_FILE
+
+# 2. 斩断所有物理网卡、无线网卡、实体显卡
+for vendor in INTEL REALTEK BROADCOM MELLANOX MARVELL MICROSOFT; do
+    echo "# CONFIG_NET_VENDOR_${vendor} is not set" >> $CONFIG_FILE
+done
+echo "# CONFIG_WLAN is not set" >> $CONFIG_FILE
+echo "# CONFIG_WIRELESS is not set" >> $CONFIG_FILE
+echo "# CONFIG_DRM_AMDGPU is not set" >> $CONFIG_FILE
+echo "# CONFIG_DRM_RADEON is not set" >> $CONFIG_FILE
+echo "# CONFIG_DRM_NOUVEAU is not set" >> $CONFIG_FILE
+echo "# CONFIG_DRM_I915 is not set" >> $CONFIG_FILE
+
+# 3. 关掉各种导致报错的校验
 echo "# CONFIG_DEBUG_INFO_BTF is not set" >> $CONFIG_FILE
 echo "# CONFIG_DEBUG_INFO_BTF_MODULES is not set" >> $CONFIG_FILE
 echo "# CONFIG_DEBUG_INFO is not set" >> $CONFIG_FILE
@@ -41,19 +63,7 @@ echo "# CONFIG_SYSTEM_REVOCATION_LIST is not set" >> $CONFIG_FILE
 echo "# CONFIG_IKHEADERS is not set" >> $CONFIG_FILE
 echo "# CONFIG_MODULE_SIG is not set" >> $CONFIG_FILE
 
-# 4. 🚨 拉黑所有垃圾硬件模块（物理网卡、无线网卡、AMD/Intel显卡等）
-for vendor in INTEL REALTEK BROADCOM MELLANOX MARVELL MICROSOFT; do
-    echo "# CONFIG_NET_VENDOR_${vendor} is not set" >> $CONFIG_FILE
-done
-echo "# CONFIG_WLAN is not set" >> $CONFIG_FILE
-echo "# CONFIG_WIRELESS is not set" >> $CONFIG_FILE
-echo "# CONFIG_DRM_AMDGPU is not set" >> $CONFIG_FILE
-echo "# CONFIG_DRM_RADEON is not set" >> $CONFIG_FILE
-echo "# CONFIG_DRM_NOUVEAU is not set" >> $CONFIG_FILE
-echo "# CONFIG_DRM_I915 is not set" >> $CONFIG_FILE
-echo "# CONFIG_SCSI is not set" >> $CONFIG_FILE
-echo "# CONFIG_ATA is not set" >> $CONFIG_FILE
-
+# 4. 物理断绝证书汇编与构建
 echo ">>> 物理断绝证书汇编与构建..."
 sed -i '/incbin/d' common/certs/system_certificates.S || true
 sed -i '/incbin/d' common/certs/revocation_certificates.S || true
@@ -72,7 +82,7 @@ sed -i 's/#039/#139/g' common/arch/arm64/kernel/vdso/sigreturn.S || true
 
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
 
-# 🚨 终极执行，加免死金牌
+echo ">>> 开始编译极简版内核..."
 if [ "$BASE_VER" != "5.10" ] && [ -f "tools/bazel" ]; then
     tools/bazel run --config=stamp --notrim \
       --action_env=SOURCE_DATE_EPOCH="$OFFICIAL_DATE" \
@@ -87,10 +97,11 @@ else
     export EXTRA_LINUX_VERSION="-g${OFFICIAL_HASH}"
     
     if [ -f "build/build.sh" ]; then
-        bash build/build.sh || echo "⚠️ 编译有报错，尝试强行提取主内核..."
+        bash build/build.sh || echo "⚠️ 编译有小报错，尝试强行提取主内核..."
     fi
 fi
 
+# 提取 Image (免死金牌)
 IMAGE_PATH="$(find out/dist -type f -name 'Image' -print -quit)"
 if [ -n "${IMAGE_PATH}" ] && [ -f "${IMAGE_PATH}" ]; then
     echo ">>> 🎉 成功提取到主内核 Image!"
