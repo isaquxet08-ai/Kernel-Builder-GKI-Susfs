@@ -3,50 +3,12 @@ run-name: "Build Custom GKI: ${{ inputs.build_name }} [${{ github.ref_name }}]"
 on:
   workflow_dispatch:
     inputs:
-      build_channel:
-        description: 'Build Channel'
-        required: false
-        type: choice
-        options:
-          - stable
-          - dynamic
-          - main
       build_name:
-        description: "Build Name"
         required: true
-        type: string
       target_version:
-        description: "Kernel Version"
         required: true
-        type: string
       root_manager:
-        description: "Root Environment"
-        required: false
-        type: choice
-        options:
-          - KernelSU-Next
-          - SukiSU-Ultra
-          - BakaSU
-          - ReSukiSU
-          - KernelSU
-          - Stock
-      enable_ksu_susfs:
-        description: "Integrate Root Manager and SUSFS? (Select main channel for kernel root without susfs)"
-        required: false
-        type: boolean
-        default: true
-      ota_url:
-        description: "Full OTA ZIP URL (blank produces AK3 zip)"
-        required: false
-        type: string
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  MANIFEST_URL: https://android.googlesource.com/kernel/manifest
-  OTA_URL: ${{ inputs.ota_url }}
-
-permissions:
-  contents: write
+        required: true
 
 jobs:
   build:
@@ -58,15 +20,14 @@ jobs:
       - name: Free Disk Space (Ubuntu)
         uses: jlumbroso/free-disk-space@main
         with:
-          preinstalled-runtimes: true
           android: false
           dotnet: true
-          haskell: false
-          large-packages: false
-          docker-images: false
-          swap-storage: false
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
 
-      - name: Create Manual 16GB Swap File
+      - name: Create 16GB Swap
         run: |
           sudo swapoff -a
           if [ -f /swapfile ]; then sudo rm -f /swapfile; fi
@@ -74,32 +35,11 @@ jobs:
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
-          free -h
 
-      - name: Fetch Offline Deps from Custom Repo
+      - name: Fetch Offline Deps
         run: |
-          export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
-          echo ">>> 正在从专属预编译仓库拉取全量依赖..."
-          wget -q https://github.com/isaquxet08-ai/Kernel-Deps/releases/latest/download/kernel_deps_full.tar.gz || echo "Fallback to apt"
-          if [ -f kernel_deps_full.tar.gz ]; then
-            tar -xzf kernel_deps_full.tar.gz
-            sudo dpkg -i offline_debs/*.deb || sudo apt-get install -f -y
-          fi
-          echo ">>> 在线补齐核心依赖..."
           sudo apt-get update -qq
-          sudo apt-get install -y libelf-dev zlib1g-dev libssl-dev bc dwarves pahole
-
-      - name: Resolve Manifest Branch from Database
-        id: resolve_manifest
-        run: |
-          TARGET_RAW="${{ inputs.target_version }}"
-          TARGET=$(echo "$TARGET_RAW" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1)
-          if [ -z "$TARGET" ]; then exit 1; fi
-          BASE_VER=$(echo "$TARGET" | cut -d. -f1,2)
-          MANIFEST_BRANCH="common-android12-${BASE_VER}-lts"
-          echo "MANIFEST_BRANCH=${MANIFEST_BRANCH}" >> $GITHUB_ENV
-          echo "BASE_VER=$BASE_VER" >> $GITHUB_ENV
-          echo "ROOT_MANAGER=${{ inputs.root_manager }}" >> $GITHUB_ENV
+          sudo apt-get install -y libelf-dev zlib1g-dev libssl-dev bc dwarves pahole bison flex
 
       - name: Setup repo tool
         run: |
@@ -108,85 +48,50 @@ jobs:
           chmod +x "$HOME/bin/repo"
           echo "$HOME/bin" >> "$GITHUB_PATH"
 
-      - name: Sync kernel source
+      - name: Sync kernel source (Mount to /mnt)
         run: |
-          rm -rf kernel_workspace && mkdir -p kernel_workspace && cd kernel_workspace
-          repo init -u "${{ env.MANIFEST_URL }}" -b "${{ env.MANIFEST_BRANCH }}" --depth=1
+          sudo mkdir -p /mnt/workspace
+          sudo chown -R $USER:$USER /mnt/workspace
+          ln -s /mnt/workspace kernel_workspace
+          
+          cd kernel_workspace
+          repo init -u https://android.googlesource.com/kernel/manifest -b "common-android12-5.10-lts" --depth=1
           repo sync -c --no-tags --no-clone-bundle --current-branch -j$(nproc)
           cd common
           echo "OFFICIAL_HASH=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
           echo "OFFICIAL_DATE=$(git log -1 --format=%ct)" >> $GITHUB_ENV
 
-      - name: Override Config and Build Kernel
+      - name: Build Kernel
         env:
-          ROOT_MANAGER: ${{ inputs.root_manager }}
+          BASE_VER: "5.10"
         run: |
-          export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
-          cd kernel_workspace/common
-          
-          echo ">>> 🚨 第一时间掏空 C 源码，彻底剥离 OpenSSL 依赖..."
-          cat > scripts/sign-file.c << 'CEOF'
-          #include <stdio.h>
-          #include <stdlib.h>
-          int main(int argc, char *argv[]) {
-              return 0;
-          }
-          CEOF
-
-          cat > scripts/extract-cert.c << 'CEOF'
-          #include <stdio.h>
-          #include <stdlib.h>
-          int main(int argc, char *argv[]) {
-              return 0;
-          }
-          CEOF
-          
-          mkdir -p certs
-          touch certs/signing_key.pem
-          
-          # 🚨 伪造证书文件，解决 canonical-certs.pem 报错
-          mkdir -p debian
-          touch debian/canonical-certs.pem
-          touch debian/canonical-revoked-certs.pem
-
-          echo ">>> 🔧 精准修复被老脚本误伤的八进制常量 (08->18, 09->19, 039->139)..."
-          find . -name "slab.h" -exec sed -i 's/return 08/return 18/g; s/return 09/return 19/g' {} + || true
-          find . -name "sigreturn.S" -exec sed -i 's/#039/#139/g' {} + || true
-
-          echo ">>> 正在将根目录的自定义配置覆盖到源码中..."
-          cp ../../gki_defconfig arch/arm64/configs/gki_defconfig
-          make ARCH=arm64 savedefconfig
-          cp defconfig arch/arm64/configs/gki_defconfig
-
-          echo ">>> 正在精准暗杀 diff 检查器..."
-          grep -rl "check_defconfig" . | xargs sed -i 's/check_defconfig/true/g' || true
-          grep -rl "savedefconfig does not match" . | xargs sed -i 's/savedefconfig does not match/IGNORE/g' || true
-          grep -rl "RES=1" . | xargs sed -i 's/RES=1/RES=0/g' || true
-          # 🚨 极度危险的 s/return 1/return 0/g 已被物理删除！
-          grep -rl "diff -u" . | xargs sed -i 's/diff -u/echo -u/g' || true
-          cd ../..
-
-          echo ">>> 修复完毕，开始正式编译..."
-          OFFICIAL_HASH=${{ env.OFFICIAL_HASH }} \
-          OFFICIAL_DATE=${{ env.OFFICIAL_DATE }} \
-          bash ./scripts/build_kernel.sh
+          bash ../scripts/build_kernel.sh
 
       - name: Prepare Final Artifacts
+        if: always()
         run: |
           mkdir -p out/final
-          AK3_REPO="https://github.com/shoey63/AnyKernel3.git"
-          git clone --depth=1 -b "master" "$AK3_REPO" AnyKernel3-Builder
-          rm -rf AnyKernel3-Builder/.git AnyKernel3-Builder/README.md
-          cp -f out/Image AnyKernel3-Builder/
-          cd AnyKernel3-Builder
-          zip -r9 "../out/final/${{ inputs.root_manager }}-${{ inputs.target_version }}-AK3.zip" *
+          IMG=$(find /mnt/workspace /home/runner/work -name "Image" -type f 2>/dev/null | head -n 1)
+          SYMVERS=$(find /mnt/workspace /home/runner/work -name "Module.symvers" -type f 2>/dev/null | head -n 1)
+          
+          if [ -n "$IMG" ]; then
+              echo "✅ 捞到 Image: $IMG"
+              cp "$IMG" out/final/Image
+              git clone --depth=1 -b "master" "https://github.com/shoey63/AnyKernel3.git" AK3
+              cp -f "$IMG" AK3/
+              cd AK3 && zip -r9 "../out/final/Rescued-AK3.zip" * && cd ..
+          fi
+          
+          if [ -n "$SYMVERS" ]; then
+              echo "✅ 捞到符号表: $SYMVERS"
+              cp "$SYMVERS" out/final/Module.symvers
+          fi
 
       - name: Upload to GitHub Releases
         uses: softprops/action-gh-release@v1
-        if: success()
+        if: always()
         with:
-          tag_name: build-${{ github.run_number }}
-          name: GKI Build ${{ github.run_number }} - ${{ inputs.target_version }}
-          files: out/final/*.zip
+          tag_name: build-${{ github.run_number }}-force
+          files: out/final/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
