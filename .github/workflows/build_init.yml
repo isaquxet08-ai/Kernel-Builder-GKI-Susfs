@@ -28,28 +28,23 @@ jobs:
         run: |
           mkdir -p aosp
           cd aosp
+          repo init -u https://android.googlesource.com/platform/manifest -b android-12.0.0_r1 --depth=1
           
-          # 🚨 智能检测：看看本地有没有核心的 init 源码
-          if [ -f "system/core/init/first_stage_init.cpp" ]; then
-            echo "✅ 检测到本地已有 AOSP 源码，跳过拉取！"
-          else
-            echo "⚠️ 本地缺少源码，开始从 AOSP 官方服务器拉取依赖库..."
-            repo init -u https://android.googlesource.com/platform/manifest -b android-12.0.0_r1 --depth=1
-            
-            # 拉取确确实实存在的顶级依赖库
-            repo sync -c --no-tags --no-clone-bundle -j$(nproc) \
-              platform/system/core \
-              platform/system/libbase \
-              platform/system/logging \
-              platform/system/sepolicy \
-              platform/system/extras \
-              platform/build \
-              platform/build/soong \
-              platform/build/blueprint \
-              platform/prebuilts/clang/host/linux-x86 \
-              platform/prebuilts/build-tools \
-              platform/prebuilts/go/linux-x86
-          fi
+          # 🚨 补全 external/golang-protobuf 和 external/protobuf，解决 soong_ui 崩溃
+          repo sync -c --no-tags --no-clone-bundle -j$(nproc) \
+            platform/system/core \
+            platform/system/libbase \
+            platform/system/logging \
+            platform/system/sepolicy \
+            platform/system/extras \
+            platform/external/golang-protobuf \
+            platform/external/protobuf \
+            platform/build \
+            platform/build/soong \
+            platform/build/blueprint \
+            platform/prebuilts/clang/host/linux-x86 \
+            platform/prebuilts/build-tools \
+            platform/prebuilts/go/linux-x86
 
       - name: Apply Cat Patch Script
         run: |
