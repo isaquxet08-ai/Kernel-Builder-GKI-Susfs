@@ -17,6 +17,12 @@ jobs:
         with:
           android: true
 
+      # 🚨 1. 全量补齐 Ubuntu 宿主机底层依赖
+      - name: Install Ubuntu Build Essentials
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y git-core gnupg flex bison build-essential zip curl zlib1g-dev libc6-dev-i386 libncurses5 lib32ncurses5-dev x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig
+
       - name: Setup repo tool
         run: |
           mkdir -p "$HOME/bin"
@@ -24,13 +30,13 @@ jobs:
           chmod +x "$HOME/bin/repo"
           echo "$HOME/bin" >> $GITHUB_PATH
 
-      - name: Check & Sync AOSP Source
+      # 🚨 2. 全量拉取 AOSP 核心源码及 VNDK 全系列
+      - name: Check & Sync AOSP Source (Heavy)
         run: |
           mkdir -p aosp
           cd aosp
           repo init -u https://android.googlesource.com/platform/manifest -b android-12.0.0_r1 --depth=1
           
-          # 🚨 补全 external/golang-protobuf 和 external/protobuf，解决 soong_ui 崩溃
           repo sync -c --no-tags --no-clone-bundle -j$(nproc) \
             platform/system/core \
             platform/system/libbase \
@@ -42,6 +48,11 @@ jobs:
             platform/build \
             platform/build/soong \
             platform/build/blueprint \
+            platform/prebuilts/vndk/v28 \
+            platform/prebuilts/vndk/v29 \
+            platform/prebuilts/vndk/v30 \
+            platform/prebuilts/vndk/v31 \
+            platform/prebuilts/vndk/v32 \
             platform/prebuilts/clang/host/linux-x86 \
             platform/prebuilts/build-tools \
             platform/prebuilts/go/linux-x86
@@ -68,7 +79,8 @@ jobs:
           export ALLOW_MISSING_DEPENDENCIES=true
           source build/envsetup.sh || true
           lunch aosp_arm64-userdebug || true
-          m init -j$(nproc)
+          # 🚨 核心防呆：限制并发，防止 OOM
+          m init -j4
 
       - name: Find and Upload Modded Init
         if: always()
