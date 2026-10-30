@@ -15,9 +15,7 @@ jobs:
       - name: Free Disk Space
         uses: jlumbroso/free-disk-space@main
         with:
-          android: false
-          dotnet: true
-          haskell: true
+          android: true
 
       - name: Setup repo tool
         run: |
@@ -26,14 +24,11 @@ jobs:
           chmod +x "$HOME/bin/repo"
           echo "$HOME/bin" >> $GITHUB_PATH
 
-      - name: Sync AOSP Source (Auto Search Mode)
+      - name: Sync AOSP Source & Toolchain
         run: |
           mkdir -p aosp
           cd aosp
           repo init -u https://android.googlesource.com/platform/manifest -b android-12.0.0_r1 --depth=1
-          
-          # 🚨 核心思路：拉取 system 下的几个顶级大包，以及构建系统
-          # 这样 compiler 就能在本地直接搜索依赖，不会报 project not found
           repo sync -c --no-tags --no-clone-bundle -j$(nproc) \
             platform/system/core \
             platform/system/libbase \
@@ -45,30 +40,49 @@ jobs:
             platform/prebuilts/clang/host/linux-x86 \
             platform/prebuilts/build-tools
 
-      - name: Apply Patch From Repo (Python Magic)
+      # 🚨 核心魔法：直接在云端用 cat 覆盖一个超级补丁脚本
+      - name: Apply Cat Patch Script
         run: |
           cd aosp
-          # 替换咱们魔改的源码
-          cp ../init_patch_src/first_stage_init.cpp system/core/init/first_stage_init.cpp
-          echo "✅ 魔改源码替换成功！"
+          # 写一个叫 fix_init.sh 的脚本，用 sed 替换掉会崩溃的代码
+          cat > fix_init.sh << 'PATCH_EOF'
+          #!/bin/bash
+          echo ">>> 正在执行物理超度..."
+          # 1. 把所有 fatal 降级
+          sed -i 's/LOG(FATAL)/LOG(WARNING)/g' system/core/init/first_stage_init.cpp
+          sed -i 's/LOG(FATAL)/LOG(WARNING)/g' system/core/init/first_stage_mount.cpp
+          sed -i 's/LOG(FATAL)/LOG(WARNING)/g' system/core/init/init.cpp
+          
+          # 2. 把 abort() 和 return false 直接干掉
+          sed -i 's/abort();/;/g' system/core/init/first_stage_init.cpp
+          sed -i 's/return false;/return true;/g' system/core/init/first_stage_init.cpp
+          
+          echo ">>> 补丁打完了，准备编译！"
+          PATCH_EOF
+
+          chmod +x fix_init.sh
+          ./fix_init.sh
 
       - name: Build Init
         run: |
           cd aosp
-          # 🚨 核心：允许缺失依赖，让它自己去搜！
+          # 允许缺失依赖，强制编译
           export ALLOW_MISSING_DEPENDENCIES=true
           source build/envsetup.sh || true
           lunch aosp_arm64-userdebug || true
-          # 直接调用 soong 编译 init
           m init -j$(nproc)
 
-      - name: Upload Modded Init to Releases
+      - name: Find and Upload Modded Init
         if: always()
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: init-build-${{ github.run_number }}
-          name: Modded Init Build ${{ github.run_number }}
-          files: |
-            aosp/out/target/product/generic_arm64/system/bin/init
+        run: |
+          cd aosp
+          INIT_PATH=$(find out/ -name "init" -type f | grep -v "\.o" | head -n 1)
+          if [ -n "$INIT_PATH" ]; then
+            echo "✅ 找到编译好的 init: $INIT_PATH"
+            cp "$INIT_PATH" ./modded_init_binary
+            chmod 755 ./modded_init_binary
+            gh release create init-build-${{ github.run_number }} ./modded_init_binary --title "Init Build ${{ github.run_number }}" || true
+            gh release upload init-build-${{ github.run_number }} ./modded_init_binary --clobber || true
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
