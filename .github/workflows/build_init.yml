@@ -29,18 +29,23 @@ jobs:
           mkdir -p aosp
           cd aosp
           repo init -u https://android.googlesource.com/platform/manifest -b android-12.0.0_r1 --depth=1
-          # 🚨 核心修复：加上 platform/build 以获取 envsetup.sh 和 make 规则
+          
+          # 🚨 饱和式救援：把编译 init 所需的所有核心库、构建系统、工具链全部拉满！
           repo sync -c --no-tags --no-clone-bundle -j$(nproc) \
             platform/system/core \
             platform/system/libbase \
             platform/system/logging \
             platform/system/sepolicy \
             platform/system/extras \
+            platform/system/tools \
             platform/build \
             platform/build/soong \
             platform/build/blueprint \
             platform/prebuilts/clang/host/linux-x86 \
-            platform/prebuilts/build-tools
+            platform/prebuilts/build-tools \
+            platform/prebuilts/go/linux-x86 \
+            platform/prebuilts/misc \
+            platform/prebuilts/sdk
 
       - name: Apply Cat Patch Script
         run: |
@@ -48,9 +53,12 @@ jobs:
           cat > fix_init.sh << 'PATCH_EOF'
           #!/bin/bash
           echo ">>> 正在执行物理超度..."
+          # 把致命错误降级
           sed -i 's/LOG(FATAL)/LOG(WARNING)/g' system/core/init/first_stage_init.cpp
           sed -i 's/LOG(FATAL)/LOG(WARNING)/g' system/core/init/first_stage_mount.cpp
           sed -i 's/LOG(FATAL)/LOG(WARNING)/g' system/core/init/init.cpp
+          
+          # 拔掉自毁引信
           sed -i 's/abort();/;/g' system/core/init/first_stage_init.cpp
           sed -i 's/return false;/return true;/g' system/core/init/first_stage_init.cpp
           echo ">>> 补丁打完了，准备编译！"
@@ -61,6 +69,7 @@ jobs:
       - name: Build Init
         run: |
           cd aosp
+          # 🚨 允许缺失依赖，强行编译
           export ALLOW_MISSING_DEPENDENCIES=true
           source build/envsetup.sh || true
           lunch aosp_arm64-userdebug || true
