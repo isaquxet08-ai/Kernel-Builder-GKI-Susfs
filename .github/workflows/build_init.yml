@@ -31,34 +31,30 @@ jobs:
           mkdir -p aosp
           cd aosp
           repo init -u https://android.googlesource.com/platform/manifest -b android-12.0.0_r1 --depth=1
+          
+          # 🚨 核心修复：删掉了不存在的 platform/system/libcutils
           repo sync -c --no-tags --no-clone-bundle -j$(nproc) \
             platform/system/core \
             platform/system/libbase \
             platform/system/logging \
-            platform/system/libcutils \
-            platform/system/libselinux \
             platform/system/sepolicy \
             platform/build/soong \
             platform/build/make \
             platform/prebuilts/clang/host/linux-x86 \
             platform/prebuilts/build-tools
 
-      # 🚨 潘森（Python）人马登场！用你仓库里的文件直接覆盖 AOSP 的源码！
       - name: Apply Patch From Repo (Python Magic)
         run: |
           cd aosp
-          # 用你仓库里的魔改版源码，替换掉 AOSP 原本的源码
+          # 替换咱们魔改的源码
           cp ../init_patch_src/first_stage_init.cpp system/core/init/first_stage_init.cpp
-          
-          # 如果你以后写了其他的，也可以加：
-          # cp ../init_patch_src/first_stage_mount.cpp system/core/init/first_stage_mount.cpp
-          # cp ../init_patch_src/init.cpp system/core/init/init.cpp
-          
           echo "✅ 魔改源码替换成功！"
 
       - name: Build Init
         run: |
           cd aosp
+          # 🚨 核心：允许缺失依赖，防止因为少了个小库直接崩溃
+          export ALLOW_MISSING_DEPENDENCIES=true
           source build/envsetup.sh
           lunch aosp_arm64-userdebug
           m init -j$(nproc)
