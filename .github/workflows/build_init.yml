@@ -22,14 +22,15 @@ jobs:
           large-packages: true
           swap-storage: true
 
-      # 🚨 1. 挂载 32GB 超大 Swap，彻底粉碎 16GB 内存限制
       - name: Setup Swap and /mnt Space
         run: |
-          sudo fallocate -l 32G /mnt/swapfile || sudo dd if=/dev/zero of=/mnt/swapfile bs=1M count=32768
+          sudo fallocate -l 16G /mnt/swapfile || sudo dd if=/dev/zero of=/mnt/swapfile bs=1M count=16384
           sudo chmod 600 /mnt/swapfile
           sudo mkswap /mnt/swapfile
           sudo swapon /mnt/swapfile
           free -h
+          sudo mkdir -p /mnt/aosp /mnt/aosp_out
+          sudo chown -R $USER:$USER /mnt/aosp /mnt/aosp_out
 
       - name: Install Ubuntu Build Essentials
         run: |
@@ -43,10 +44,8 @@ jobs:
           chmod +x "$HOME/bin/repo"
           echo "$HOME/bin" >> $GITHUB_PATH
 
-      # 🚨 2. 在 /mnt 超大目录拉取源码
       - name: Check & Sync AOSP Source
         run: |
-          mkdir -p /mnt/aosp
           cd /mnt/aosp
           repo init -u https://android.googlesource.com/platform/manifest -b android-12.0.0_r1 --depth=1
           repo sync -c --no-tags --no-clone-bundle -j4 \
@@ -67,22 +66,23 @@ jobs:
             platform/build/blueprint \
             platform/prebuilts/build-tools \
             platform/prebuilts/clang/host/linux-x86 \
-            platform/prebuilts/go/linux-x86
+            platform/prebuilts/go/linux-x86 \
+            platform/prebuilts/vndk/v28 \
+            platform/prebuilts/vndk/v29 \
+            platform/prebuilts/vndk/v30 \
+            platform/prebuilts/vndk/v31 \
+            platform/prebuilts/vndk/v32
 
-      # 🚨 3. 物理超度 VNDK 强制校验 和 init 源码
       - name: Apply Cat Patch Script
         run: |
           cd /mnt/aosp
           cat > fix_init.sh << 'PATCH_EOF'
           #!/bin/bash
-          echo ">>> 1. 物理超度 init 源码..."
           sed -i 's/LOG(FATAL)/LOG(WARNING)/g' system/core/init/first_stage_init.cpp
           sed -i 's/LOG(FATAL)/LOG(WARNING)/g' system/core/init/first_stage_mount.cpp
           sed -i 's/LOG(FATAL)/LOG(WARNING)/g' system/core/init/init.cpp
           sed -i 's/abort();/;/g' system/core/init/first_stage_init.cpp
           sed -i 's/return false;/return true;/g' system/core/init/first_stage_init.cpp
-          
-          echo ">>> 2. 物理超度 VNDK 强制校验..."
           sed -i 's/error: VNDK version .* not found./warning: VNDK not found, bypassed!/g' build/make/core/board_config.mk
           sed -i 's/$(error VNDK version $(BOARD_VNDK_VERSION) not found.)/ /g' build/make/core/board_config.mk
           sed -i 's/error: VNDK version .* not found./ /g' build/make/core/board_config.mk
@@ -90,41 +90,26 @@ jobs:
           chmod +x fix_init.sh
           ./fix_init.sh
 
-      # 🚨 4. 执行编译（这里加了 id，方便兜底时判断状态）
       - name: Build Init
-        id: build_step
         run: |
           cd /mnt/aosp
           export ALLOW_MISSING_DEPENDENCIES=true
           export OUT_DIR=/mnt/aosp_out
-          mkdir -p $OUT_DIR
-          
           source build/envsetup.sh || true
           lunch aosp_arm64-userdebug || true
-          
-          # Swap 已开启，直接 -j8 火力全开
-          m init -j8 || echo "!!! 编译过程报错了，但兜底机制会继续捞产物 !!!"
+          m init -j4 || echo "!!! 编译报错，触发兜底 !!!"
 
-      # 🚨 5. 【核心兜底机制】不管前面编译是否报错，强行捞取产物并发布！
-      - name: Rescue and Upload Modded Init (兜底打捞)
-        if: always() # 无论前面多红，这一步必执行
+      - name: Rescue and Upload Modded Init
+        if: always()
         run: |
-          cd /mnt/aosp
-          echo ">>> 开始执行兜底打捞机制..."
-          
-          # 深度搜索整个 /mnt 目录下的 init 文件
           INIT_PATH=$(find /mnt/aosp_out/ -name "init" -type f | grep -v "\.o" | head -n 1)
-          
           if [ -n "$INIT_PATH" ]; then
-            echo "✅ 成功打捞到编译好的 init: $INIT_PATH"
             cp "$INIT_PATH" /mnt/aosp/modded_init_binary
             chmod 755 /mnt/aosp/modded_init_binary
-            
-            # 创建 Release 并上传
-            gh release create init-build-${{ github.run_number }} /mnt/aosp/modded_init_binary --title "Init Build ${{ github.run_number }}" --notes "即使编译失败，依然被 Rescue 机制捞出的产物！" || true
+            gh release create init-build-${{ github.run_number }} /mnt/aosp/modded_init_binary --title "Init Build ${{ github.run_number }}" || true
             gh release upload init-build-${{ github.run_number }} /mnt/aosp/modded_init_binary --clobber || true
           else
-            echo "❌ 经过深度搜索，没能找到 init 文件，这次真沉底了。"
+            echo "❌ 没找到 init 文件。"
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
